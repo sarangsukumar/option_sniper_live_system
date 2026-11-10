@@ -73,31 +73,29 @@ def log(msg: str):
         pass
 
 
-def is_trade_already_executed_today() -> bool:
-    """Verifies if Confirmation #1 trade was already placed today."""
+def is_trade_already_executed_today(stock: str = None) -> bool:
+    """Verifies if daily trades limit is reached or duplicate stock trade was already placed today."""
     today_str = datetime.now(IST).strftime('%Y-%m-%d')
     ledger = TradeLedger()
-    summary = ledger.get_today_summary()
-    if summary.get('trades_count', 0) >= MAX_DAILY_TRADES:
+    total_trades = ledger.get_today_trades_count()
+    if total_trades >= MAX_DAILY_TRADES:
         return True
-
-    # Check state file
-    if os.path.exists(STATE_FILE):
-        try:
-            import json
-            with open(STATE_FILE, 'r') as f:
-                state = json.load(f)
-                if state.get('date') == today_str and state.get('status') in ['ACTIVE', 'COMPLETED']:
-                    return True
-        except Exception:
-            pass
+    if stock and ledger.get_today_trades_count(stock=stock) > 0:
+        return True
+    open_trades = ledger.get_open_trades()
+    if len(open_trades) >= MAX_CONCURRENT_POSITIONS:
+        return True
     return False
 
 
 def save_state(state_dict: dict):
     try:
         import json
+        stock = state_dict.get('stock', 'trade')
+        stock_state_file = os.path.join(REPO_ROOT, 'data', f'active_live_trade_{stock}.json')
         os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        with open(stock_state_file, 'w') as f:
+            json.dump(state_dict, f, indent=2)
         with open(STATE_FILE, 'w') as f:
             json.dump(state_dict, f, indent=2)
     except Exception as e:
@@ -116,9 +114,15 @@ def execute_trade(stock: str, rank: int, cmp: float, trigger_type: str, entry_09
         log("ℹ️ Today is Monday. Option Sniper strictly excludes Mondays per verified empirical model. Skipping.")
         return
 
-    # 2. Daily Max Trades Guard (Conf #1 Only)
-    if is_trade_already_executed_today():
-        log(f"ℹ️ Confirmation #1 already executed for today ({today_str}). Max daily trades limit reached ({MAX_DAILY_TRADES}). Skipping.")
+    # 2. Daily Max Trades Guard (Conf #1 and Conf #2 enabled per Option B)
+    if is_trade_already_executed_today(stock):
+        log(f"ℹ️ Trade already executed for {stock} or daily limit ({MAX_DAILY_TRADES}) reached for today ({today_str}). Skipping.")
+        return
+
+    ledger = TradeLedger()
+    conf_order = ledger.get_today_trades_count() + 1
+    if conf_order > MAX_CONFIRMATION_ORDER:
+        log(f"ℹ️ Confirmation #{conf_order} exceeds MAX_CONFIRMATION_ORDER ({MAX_CONFIRMATION_ORDER}). Skipping.")
         return
 
     selector = StrikeSelector()
@@ -213,7 +217,7 @@ def execute_trade(stock: str, rank: int, cmp: float, trigger_type: str, entry_09
 
     trade_record = {
         'date': today_str,
-        'trade_id': f"OPT_{today_str}_{stock}_CONF1",
+        'trade_id': f"OPT_{today_str}_{stock}_CONF{conf_order}",
         'stock': stock,
         'model_rank': rank,
         'trigger_type': trigger_type,
@@ -222,7 +226,7 @@ def execute_trade(stock: str, rank: int, cmp: float, trigger_type: str, entry_09
         'opt_type': 'PE',
         'expiry': expiry_date,
         'dte': dte,
-        'conf_order': 1,
+        'conf_order': conf_order,
         'quantity': total_qty,
         'lot_size': lot_size,
         'lots': 1,
@@ -243,7 +247,7 @@ def execute_trade(stock: str, rank: int, cmp: float, trigger_type: str, entry_09
     entry_alert = (
         f"🎯 <b>OPTION SNIPER LIVE LIMIT ORDER PLACED</b> 🟢\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"• <b>Stock:</b> <code>{stock}</code> (Rank #{rank} - Conf #1)\n"
+        f"• <b>Stock:</b> <code>{stock}</code> (Rank #{rank} - Conf #{conf_order})\n"
         f"• <b>Contract:</b> <code>{nse_symbol}</code>\n"
         f"• <b>Order Type:</b> <b>LIMIT @ Current Price (₹{limit_entry_px:.2f})</b>\n"
         f"• <b>Strike:</b> ₹{atm_strike:,.1f} PE | <b>Expiry:</b> {expiry_date} (DTE: {dte}d)\n"

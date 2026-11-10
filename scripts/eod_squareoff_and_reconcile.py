@@ -10,6 +10,7 @@ Ensures zero overnight F&O carryover and broadcasts verified PnL to Telegram.
 import os
 import sys
 import json
+import glob
 import pytz
 from datetime import datetime
 
@@ -51,14 +52,15 @@ def main():
     ledger = TradeLedger()
     notifier = TelegramNotifier()
 
-    # Step 1: Check for active unclosed position
-    if os.path.exists(STATE_FILE):
+    # Step 1: Check for active unclosed positions (supports up to 2 concurrent trades)
+    state_files = glob.glob(os.path.join(REPO_ROOT, 'data', 'active_live_trade*.json'))
+    for s_file in state_files:
         try:
-            with open(STATE_FILE, 'r') as f:
+            with open(s_file, 'r') as f:
                 state = json.load(f)
             
             if state.get('date') == today_str and state.get('status') == 'ACTIVE':
-                log(f"⚠️ Found active unclosed position: {state.get('option_symbol')}. Initiating square-off...")
+                log(f"⚠️ Found active unclosed position: {state.get('option_symbol')} in {os.path.basename(s_file)}. Initiating square-off...")
                 broker = KotakNeoBroker() if BROKER_TYPE == "KOTAK" and not DRY_RUN else MockBroker()
                 if broker.connect():
                     sym = state['option_symbol']
@@ -67,7 +69,7 @@ def main():
                     ltp = broker.get_ltp(sym) or entry_px
 
                     limit_exit_px = round_to_nse_tick(ltp, 'floor')
-                    res = broker.place_order(symbol=sym, quantity=qty, side="SELL", order_type="LIMIT", price=limit_exit_px, tag="EOD_MANDATORY_1515")
+                    res = broker.place_order(symbol=sym, quantity=qty, side="SELL", order_type="LIMIT", price=limit_exit_px)
                     fill_px = float(res.get('fill_price', limit_exit_px))
                     gross_pnl = (fill_px - entry_px) * qty
                     ret_pct = (fill_px - entry_px) / entry_px * 100.0
@@ -80,12 +82,12 @@ def main():
                     state['return_pct'] = ret_pct
                     state['status'] = 'COMPLETED'
 
-                    with open(STATE_FILE, 'w') as f:
+                    with open(s_file, 'w') as f:
                         json.dump(state, f, indent=2)
                     ledger.record_exit(state)
-                    log(f"✅ Position cleanly liquidated: PnL = ₹{gross_pnl:+,.2f} ({ret_pct:+.2f}%)")
+                    log(f"✅ Position cleanly liquidated: {sym} | PnL = ₹{gross_pnl:+,.2f} ({ret_pct:+.2f}%)")
         except Exception as e:
-            log(f"⚠️ Error during active trade check: {e}")
+            log(f"⚠️ Error during active trade check on {s_file}: {e}")
 
     # Step 2: Generate and broadcast Daily Summary
     summary = ledger.get_today_summary()

@@ -186,3 +186,33 @@ class TradeLedger:
             "total_pnl": tot_pnl,
             "circuit_breaker": False
         }
+
+    def get_open_trades(self) -> List[Dict[str, Any]]:
+        """Returns all trades currently marked as OPEN for today."""
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM option_trades WHERE date = ? AND status = 'OPEN'",
+                (today_str,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_today_trades_count(self, stock: str = None) -> int:
+        """Returns total trades count (OPEN or CLOSED) placed today, optionally for a specific stock."""
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            if stock:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM option_trades WHERE date = ? AND stock = ?",
+                    (today_str, stock)
+                )
+            else:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM option_trades WHERE date = ?",
+                    (today_str,)
+                )
+            row = cursor.fetchone()
+            return int(row[0]) if row else 0

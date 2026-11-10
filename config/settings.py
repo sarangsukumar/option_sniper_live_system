@@ -91,8 +91,8 @@ MARKET_CLOSE_TIME = "15:30:00"
 
 # Confirmation Filter
 # '1' = Strictly Confirmation #1 Only (Highest win rate: 85.92%)
-# '2' = Confirmation #1 and #2
-MAX_CONFIRMATION_ORDER = int(os.environ.get("OPTION_SNIPER_MAX_CONF", "1"))
+# '2' = Confirmation #1 and #2 (First 2 confirmed trades, Option B)
+MAX_CONFIRMATION_ORDER = int(os.environ.get("OPTION_SNIPER_MAX_CONF", "2"))
 
 # -----------------------------------------------------------------------------
 # TICKER CONVICTION LISTS
