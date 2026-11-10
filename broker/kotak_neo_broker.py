@@ -189,9 +189,10 @@ class KotakNeoBroker(BaseBroker):
         return ""
 
     def get_ltp(self, symbol: str) -> float:
-        """Fetches live quotes from Kotak Neo."""
+        """Fetches live quotes from Kotak Neo with automatic session self-healing."""
         if not self.is_connected or not self.client:
-            return 0.0
+            if not self.connect():
+                return 0.0
         try:
             token = self.resolve_token(symbol) if not str(symbol).isdigit() else str(symbol)
             if not token:
@@ -205,9 +206,28 @@ class KotakNeoBroker(BaseBroker):
                 item = quote['message'][0]
                 ltp_val = item.get('ltp', item.get('last_price', 0.0))
                 return float(ltp_val) if ltp_val is not None else 0.0
+
+            # Session refresh fallback on unauthorized or token drop
+            if isinstance(quote, dict) and ('error' in quote or quote.get('stat') != 'Ok'):
+                print(f"⚠️ Kotak quote error: {quote}. Attempting session refresh...")
+                if self.connect():
+                    quote = self.client.quotes(instrument_tokens=[{"instrument_token": str(token), "exchange_segment": "nse_fo"}], quote_type="ltp")
+                    if isinstance(quote, list) and len(quote) > 0:
+                        item = quote[0]
+                        ltp_val = item.get('ltp', item.get('last_price', 0.0))
+                        return float(ltp_val) if ltp_val is not None else 0.0
             return 0.0
         except Exception as e:
-            print(f"⚠️ Error fetching Kotak LTP for {symbol}: {e}")
+            print(f"⚠️ Error fetching Kotak LTP for {symbol}: {e}. Retrying with reconnect...")
+            try:
+                if self.connect():
+                    quote = self.client.quotes(instrument_tokens=[{"instrument_token": str(token), "exchange_segment": "nse_fo"}], quote_type="ltp")
+                    if isinstance(quote, list) and len(quote) > 0:
+                        item = quote[0]
+                        ltp_val = item.get('ltp', item.get('last_price', 0.0))
+                        return float(ltp_val) if ltp_val is not None else 0.0
+            except Exception:
+                pass
             return 0.0
 
     def place_order(
@@ -221,7 +241,8 @@ class KotakNeoBroker(BaseBroker):
     ) -> Dict[str, Any]:
         """Places live order on Kotak Neo."""
         if not self.is_connected or not self.client:
-            return {"status": "FAILED", "order_id": "", "fill_price": 0.0, "message": "Broker not connected"}
+            if not self.connect():
+                return {"status": "FAILED", "order_id": "", "fill_price": 0.0, "message": "Broker not connected"}
 
         try:
             tt = "B" if side.upper() == "BUY" else "S"
