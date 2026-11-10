@@ -16,7 +16,7 @@ import re
 from datetime import datetime, date
 from pathlib import Path
 import pandas as pd
-from config.settings import LOT_SIZE_CSV, EXPIRY_DATES_CSV, MIN_OPTION_PREMIUM
+from config.settings import LOT_SIZE_CSV, EXPIRY_DATES_CSV, MIN_OPTION_PREMIUM, EXPIRY_SKIP_DTE_THRESHOLD
 
 
 class StrikeSelector:
@@ -115,12 +115,41 @@ class StrikeSelector:
         atm = self.calculate_atm_strike(cmp, step)
         return atm + (steps_in * step)
 
+    def calculate_dte(self, trade_date: str = None, expiry_date: str = None) -> int:
+        """
+        Calculates calendar Days to Expiry (DTE).
+        """
+        if trade_date is None:
+            trade_dt = date.today()
+        else:
+            trade_dt = pd.to_datetime(trade_date).date()
+
+        if expiry_date is None:
+            expiry_date = self.get_active_expiry(trade_date)
+
+        exp_dt = pd.to_datetime(expiry_date).date()
+        return (exp_dt - trade_dt).days
+
+    def is_expiry_lockout(self, trade_date: str = None, expiry_date: str = None) -> tuple:
+        """
+        Enforces the Last-4-Days Before Monthly Expiry Skip Rule from the Simulation Report:
+        - Put Options within <= 4 calendar days of monthly expiry suffer severe theta decay
+          and gamma whipsaws.
+        - Trades within <= 4 calendar days are strictly skipped (NOT rolled to next month).
+
+        Returns:
+        --------
+        (is_lockout: bool, dte: int)
+        """
+        dte = self.calculate_dte(trade_date, expiry_date)
+        return (dte <= EXPIRY_SKIP_DTE_THRESHOLD, dte)
+
     def get_active_expiry(self, trade_date: str = None) -> str:
         """
         Determines current active monthly expiry date.
-        Applies Expiry Week Rollover Rule:
-        If DTE (Days to Expiry) <= 3 days, rolls to Next Month's monthly expiry
-        to protect against gamma spikes, pin risk, and illiquid wide spreads.
+        Strict Simulation Rule: Uses the current monthly expiry directly.
+        (If DTE <= 4 days, trading is strictly skipped by the risk governor,
+        never rolled into the next month).
         """
         if trade_date is None:
             trade_dt = date.today()
@@ -137,13 +166,6 @@ class StrikeSelector:
             return (trade_dt.replace(day=28)).strftime('%Y-%m-%d')
 
         nearest_expiry = future_expiries[0]
-        dte = (nearest_expiry - trade_dt).days
-
-        # Expiry Week Rollover Rule (<= 3 days)
-        if dte <= 3 and len(future_expiries) > 1:
-            # Roll to next month's expiry
-            return future_expiries[1].strftime('%Y-%m-%d')
-
         return nearest_expiry.strftime('%Y-%m-%d')
 
     def build_option_symbol(
@@ -194,11 +216,12 @@ class StrikeSelector:
             "lot_size": self.get_lot_size(stock_clean)
         }
 
-    def validate_option_candidate(self, cmp: float, premium: float) -> tuple:
+    def validate_option_candidate(self, cmp: float, premium: float, trade_date: str = None) -> tuple:
         """
         Pre-trade sanity checks:
         - Prevents penny option traps (premium < MIN_OPTION_PREMIUM).
         - Verifies valid positive CMP.
+        - Enforces DTE <= 4 days Expiry Skip Rule from Simulation.
 
         Returns:
         --------
@@ -208,5 +231,10 @@ class StrikeSelector:
             return False, f"Invalid underlying CMP: {cmp}"
         if premium is not None and premium < MIN_OPTION_PREMIUM:
             return False, f"Penny option trap: Premium ₹{premium} < ₹{MIN_OPTION_PREMIUM}"
+
+        # Strict Simulation Expiry Skip Rule
+        is_lockout, dte = self.is_expiry_lockout(trade_date)
+        if is_lockout:
+            return False, f"EXPIRY_LOCKOUT: DTE ({dte}d) <= {EXPIRY_SKIP_DTE_THRESHOLD}d. Strict Expiry Skip Rule from Simulation (no trading within 4 days of expiry)."
 
         return True, "Valid candidate"

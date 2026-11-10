@@ -39,8 +39,12 @@ DRY_RUN = os.environ.get("OPTION_SNIPER_DRY_RUN", "0") == "1"
 # Base capital allocated to the pure options strategy
 TOTAL_CAPITAL = float(os.environ.get("OPTION_SNIPER_CAPITAL", "100000.0"))  # Default ₹1,00,000
 
+# Lot sizing mode: '1_LOT' (exact 1 lot per trade, conservative live start as per simulation report)
+# or '1L_CAPITAL' (sizes lots dynamically based on ₹1.0L capital)
+LOT_SIZING_MODE = os.environ.get("OPTION_LOT_SIZING_MODE", "1_LOT").upper()
+
 # Maximum capital committed per single option trade
-CAPITAL_PER_TRADE = float(os.environ.get("OPTION_SNIPER_TRADE_CAPITAL", "35000.0"))
+CAPITAL_PER_TRADE = float(os.environ.get("OPTION_SNIPER_TRADE_CAPITAL", "100000.0"))
 
 # Maximum concurrent option positions open at once
 MAX_CONCURRENT_POSITIONS = 2
@@ -56,13 +60,20 @@ DEFAULT_MAX_OPTION_LOTS = 5
 MIN_OPTION_PREMIUM = 5.00  # Avoid penny options with high bid-ask spread %
 MIN_LOT_COST = 8000.0      # Minimum lot premium value
 
+# Expiry Skip Rule from Simulation:
+# Put Options within <= 4 calendar days of monthly expiry suffer severe theta decay.
+# In the simulation, trades within <= 4 days of expiry are strictly skipped (NOT rolled to next month).
+EXPIRY_SKIP_DTE_THRESHOLD = int(os.environ.get("OPTION_EXPIRY_SKIP_DTE", "4"))
+
 # -----------------------------------------------------------------------------
-# INTRADAY TRADE MANAGEMENT PARAMETERS
+# INTRADAY TRADE MANAGEMENT PARAMETERS (EXACT SIMULATION SPECIFICATION)
 # -----------------------------------------------------------------------------
-# Strategy targets and stops (percentage based on option entry premium)
-STOP_LOSS_PCT = 0.15          # Hard cut at -15% option premium drop
-FLOOR_LOCK_GAIN_PCT = 0.18    # At +18% gain, trail SL to Break-Even (+0.5%)
-TAKE_PROFIT_PCT = 0.38        # Target profit at +38% gain
+# Simulation strategy: Sync_Hybrid_A_WR85 (+3.5% Arm -> +1.2% Floor Lock + Sync W80)
+# Achieved 85.07% ATM Win Rate and 85.92% Conf #1 Win Rate in 2024-2026 Audit Report
+STOP_LOSS_PCT = float(os.environ.get("OPTION_STOP_LOSS_PCT", "0.15"))          # Hard cut at -15% option premium drop
+FLOOR_LOCK_ARM_PCT = float(os.environ.get("OPTION_FLOOR_LOCK_ARM_PCT", "0.035")) # At +3.5% gain, arm floor lock
+FLOOR_LOCK_GAIN_PCT = float(os.environ.get("OPTION_FLOOR_LOCK_GAIN_PCT", "0.012")) # Lock in +1.2% guaranteed floor
+TAKE_PROFIT_PCT = float(os.environ.get("OPTION_TAKE_PROFIT_PCT", "0.38"))        # Target profit at +38% gain
 
 # Underlying stock price guardrail
 UNDERLYING_SL_PCT = 0.008     # If stock bounces +0.8% above breakdown price, exit option

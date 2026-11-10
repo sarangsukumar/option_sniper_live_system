@@ -45,5 +45,25 @@ class TestRiskController(unittest.TestCase):
         self.assertIn("2-Loss Daily Halt", self.risk.circuit_breaker_reason)
 
 
+    def test_position_sizing_1lot_and_capital(self):
+        # 1-Lot mode (default)
+        lots_1lot = self.risk.compute_position_size(premium=35.0, lot_size=600, stock_symbol="TECHM")
+        self.assertEqual(lots_1lot, 1)
+
+        # 1L Capital dynamic mode
+        risk_cap = RiskController(
+            total_capital=100000.0,
+            capital_per_trade=100000.0,
+            lot_sizing_mode="1L_CAPITAL"
+        )
+        # Neutral stock (INFY): premium 35.0, lot 600 -> contract cost 21,000 -> 100k / 21k = 4.76 -> 4 lots
+        lots_cap = risk_cap.compute_position_size(premium=35.0, lot_size=600, stock_symbol="INFY")
+        self.assertGreaterEqual(lots_cap, 4)
+
+        # Tier-1 stock (TECHM): capital capped at 45% of total account (45,000) -> 45k / 21k = 2 lots
+        lots_tier1 = risk_cap.compute_position_size(premium=35.0, lot_size=600, stock_symbol="TECHM")
+        self.assertEqual(lots_tier1, 2)
+
+
 if __name__ == '__main__':
     unittest.main()

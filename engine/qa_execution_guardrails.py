@@ -52,7 +52,8 @@ def calculate_option_lots(
     allocated_capital: float,
     premium_cmp: float,
     lot_size: int,
-    max_lots: int = DEFAULT_MAX_OPTION_LOTS
+    max_lots: int = DEFAULT_MAX_OPTION_LOTS,
+    sizing_mode: str = "1_LOT"
 ) -> int:
     """
     Computes integer option lots constrained by capital budget and order-book liquidity.
@@ -60,19 +61,29 @@ def calculate_option_lots(
     Parameters:
     -----------
     allocated_capital : float
-        Capital allocated for this stock trade (e.g. ₹35,000).
+        Capital allocated for this stock trade (e.g. ₹1,00,000).
     premium_cmp : float
         Option premium per share (₹).
     lot_size : int
         Exchange contract lot size (e.g. 500 shares).
     max_lots : int
         Maximum permitted lots per single-stock option order.
+    sizing_mode : str
+        '1_LOT' (default): Exactly 1 standard exchange contract lot (conservative live start).
+        '1L_CAPITAL': Dynamically sized based on allocated capital budget up to max_lots.
 
     Returns:
     --------
     int: Discrete lots to trade (1 <= lots <= max_lots).
     """
-    if premium_cmp <= 0 or lot_size <= 0 or allocated_capital <= 0:
+    if premium_cmp <= 0 or lot_size <= 0:
+        return 1
+
+    # Exact 1-Lot mode as per simulation report conservative live benchmark
+    if sizing_mode.upper() == "1_LOT":
+        return 1
+
+    if allocated_capital <= 0:
         return 1
 
     contract_cost = premium_cmp * lot_size

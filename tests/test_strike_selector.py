@@ -43,6 +43,18 @@ class TestStrikeSelector(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("Penny option trap", reason)
 
+    def test_expiry_skip_rule_dte_le_4(self):
+        # If trade date is 2 days before expiry, validate_option_candidate should reject
+        # Expiry is 2026-11-24; test date 2026-11-22 has DTE = 2 days (<= 4)
+        ok, reason = self.selector.validate_option_candidate(1000.0, 25.0, trade_date="2026-11-22")
+        self.assertFalse(ok)
+        self.assertIn("EXPIRY_LOCKOUT", reason)
+        self.assertIn("DTE (2d) <= 4d", reason)
+
+        # Non-lockout date: 2026-11-10 has DTE = 14 days (> 4)
+        ok, reason = self.selector.validate_option_candidate(1000.0, 25.0, trade_date="2026-11-10")
+        self.assertTrue(ok)
+
 
 if __name__ == '__main__':
     unittest.main()

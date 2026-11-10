@@ -73,19 +73,19 @@ class TelegramNotifier:
 ------------------------------------------------
 🎯 <b>Target (+38%):</b> ₹{trade_info['target_tp']:.2f}
 🛡️ <b>Hard SL (-15%):</b> ₹{trade_info['hard_sl']:.2f}
-🔒 <b>Floor Lock:</b> Moves SL to BE (+0.5%) at +18% gain
+🔒 <b>Floor Lock:</b> Moves SL to +1.2% profit at +3.5% gain
 ⏰ <b>Time:</b> {trade_info['entry_time']}"""
         self.send_message(msg)
 
-    def notify_floor_locked(self, stock: str, option_symbol: str, current_price: float, be_sl: float):
-        """Alerts when profit reaches +18% and SL is moved to Break-Even."""
-        msg = f"""🔒 <b>OPTION SNIPER: FLOOR LOCKED (RISK ZEROED)</b>
+    def notify_floor_locked(self, stock: str, option_symbol: str, current_price: float, floor_sl: float):
+        """Alerts when profit reaches +3.5% and SL is ratcheted to +1.2% guaranteed floor."""
+        msg = f"""🔒 <b>OPTION SNIPER: FLOOR LOCKED (PROFIT LOCKED)</b>
 ------------------------------------------------
 <b>Stock:</b> #{stock}
 <b>Contract:</b> <code>{option_symbol}</code>
-<b>Current Premium:</b> ₹{current_price:.2f} (+18% Gain Reached)
-🛡️ <b>Trailing Stop Loss:</b> Advanced to <b>₹{be_sl:.2f}</b> (Break-Even)
-✨ <i>Trade is now 100% risk-free house money.</i>"""
+<b>Current Premium:</b> ₹{current_price:.2f} (+3.5% Gain Arm Reached)
+🛡️ <b>Trailing Stop Loss:</b> Advanced to <b>₹{floor_sl:.2f}</b> (+1.2% Floor Lock)
+✨ <i>Trade is now 100% risk-free with guaranteed profit locked.</i>"""
         self.send_message(msg)
 
     def notify_trade_exit(self, exit_info: dict):

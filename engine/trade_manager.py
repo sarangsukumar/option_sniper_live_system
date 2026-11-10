@@ -16,6 +16,7 @@ from typing import Tuple, Optional
 from datetime import datetime
 from config.settings import (
     STOP_LOSS_PCT,
+    FLOOR_LOCK_ARM_PCT,
     FLOOR_LOCK_GAIN_PCT,
     TAKE_PROFIT_PCT,
     UNDERLYING_SL_PCT,
@@ -51,7 +52,7 @@ class ManagedOptionPosition:
         self.entry_time = entry_time
         self.conf_order = conf_order
 
-        # Dynamic exit levels
+        # Dynamic exit levels (Exact Simulation: Sync_Hybrid_A_WR85)
         self.hard_sl = round_to_nse_tick(self.entry_price * (1.0 - STOP_LOSS_PCT), 'floor')
         self.target_tp = round_to_nse_tick(self.entry_price * (1.0 + TAKE_PROFIT_PCT), 'floor')
         self.current_sl = self.hard_sl
@@ -68,10 +69,16 @@ class ManagedOptionPosition:
         self,
         current_option_ltp: float,
         current_underlying_ltp: float,
-        current_time_str: str = None
+        current_time_str: str = None,
+        underlying_has_exited: bool = False
     ) -> Tuple[bool, Optional[str], Optional[float]]:
         """
-        Evaluates active position against dynamic exit triggers.
+        Evaluates active position against dynamic exit triggers as per Simulation Report:
+        1. Floor Lock Trigger (+3.5% Arm -> +1.2% Locked Profit SL)
+        2. Take-Profit Target (+38% gain)
+        3. Hard Stop Loss (-15% premium or Underlying Reversal SL)
+        4. Underlying Exit Synchronous Close (SYNC_UNDERLYING_EXIT)
+        5. Mandatory 15:15 IST Square-Off
 
         Returns:
         --------
@@ -87,24 +94,24 @@ class ManagedOptionPosition:
         if current_option_ltp > self.highest_ltp:
             self.highest_ltp = current_option_ltp
 
-        # 1. Floor Lock Trigger: At +18% gain, advance SL to Break-Even (+0.5%)
+        # 1. Floor Lock Arm Trigger: Once option gains >= +3.5%, lock in +1.2% guaranteed gain
         if not self.floor_locked:
             gain_pct = (current_option_ltp - self.entry_price) / self.entry_price
-            if gain_pct >= FLOOR_LOCK_GAIN_PCT:
+            if gain_pct >= FLOOR_LOCK_ARM_PCT:
                 self.floor_locked = True
-                be_sl = round_to_nse_tick(self.entry_price * 1.005, 'floor')
-                self.current_sl = max(self.current_sl, be_sl)
+                floor_sl = round_to_nse_tick(self.entry_price * (1.0 + FLOOR_LOCK_GAIN_PCT), 'floor')
+                self.current_sl = max(self.current_sl, floor_sl)
 
-        # 2. Check Take-Profit Target Hit
+        # 2. Check Take-Profit Target Hit (+38% gain)
         if current_option_ltp >= self.target_tp:
             exit_px = round_to_nse_tick(current_option_ltp, 'floor')
             self._close_position(exit_px, current_time_str, "TAKE_PROFIT")
             return True, "TAKE_PROFIT", exit_px
 
-        # 3. Check Current Stop-Loss Hit (Hard SL or Floor-Locked BE)
+        # 3. Check Current Stop-Loss Hit (Floor-Locked +1.2% or Hard SL)
         if current_option_ltp <= self.current_sl:
             exit_px = round_to_nse_tick(current_option_ltp, 'floor')
-            reason = "FLOOR_LOCK_SL" if self.floor_locked else "HARD_STOP_LOSS"
+            reason = f"OPT_FLOOR_LOCK_+{FLOOR_LOCK_GAIN_PCT*100:.1f}%" if self.floor_locked else "OPT_SL"
             self._close_position(exit_px, current_time_str, reason)
             return True, reason, exit_px
 
@@ -116,7 +123,13 @@ class ManagedOptionPosition:
                 self._close_position(exit_px, current_time_str, "UNDERLYING_SL_REVERSAL")
                 return True, "UNDERLYING_SL_REVERSAL", exit_px
 
-        # 5. Mandatory 15:15 IST Time Stop
+        # 5. Underlying Exit Synchronous Close (SYNC_UNDERLYING_EXIT from simulation)
+        if underlying_has_exited:
+            exit_px = round_to_nse_tick(current_option_ltp, 'floor')
+            self._close_position(exit_px, current_time_str, "SYNC_UNDERLYING_EXIT")
+            return True, "SYNC_UNDERLYING_EXIT", exit_px
+
+        # 6. Mandatory 15:15 IST Time Stop
         if current_time_str >= MANDATORY_SQUAREOFF_TIME:
             exit_px = round_to_nse_tick(current_option_ltp, 'floor')
             self._close_position(exit_px, current_time_str, "TIME_SQUAREOFF_1515")

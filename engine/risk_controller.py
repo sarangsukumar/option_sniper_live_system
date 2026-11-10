@@ -20,7 +20,8 @@ from config.settings import (
     MAX_DAILY_TRADES,
     MAX_CONSECUTIVE_LOSSES_HALT,
     MAX_CONFIRMATION_ORDER,
-    TIER1_CONVICTION_STOCKS
+    TIER1_CONVICTION_STOCKS,
+    LOT_SIZING_MODE
 )
 from engine.qa_execution_guardrails import calculate_option_lots
 
@@ -33,7 +34,8 @@ class RiskController:
         max_concurrent: int = MAX_CONCURRENT_POSITIONS,
         max_daily_trades: int = MAX_DAILY_TRADES,
         max_consecutive_losses: int = MAX_CONSECUTIVE_LOSSES_HALT,
-        max_conf_order: int = MAX_CONFIRMATION_ORDER
+        max_conf_order: int = MAX_CONFIRMATION_ORDER,
+        lot_sizing_mode: str = LOT_SIZING_MODE
     ):
         self.total_capital = total_capital
         self.capital_per_trade = capital_per_trade
@@ -41,6 +43,7 @@ class RiskController:
         self.max_daily_trades = max_daily_trades
         self.max_consecutive_losses = max_consecutive_losses
         self.max_conf_order = max_conf_order
+        self.lot_sizing_mode = lot_sizing_mode.upper()
 
         # Runtime daily state tracking
         self.daily_trades_executed: int = 0
@@ -83,8 +86,13 @@ class RiskController:
     def compute_position_size(self, premium: float, lot_size: int, stock_symbol: str) -> int:
         """
         Calculates optimal discrete lot size for the trade.
-        Applies Tier-1 conviction bonus if stock is in 100% WR Club.
+        Respects LOT_SIZING_MODE:
+        - '1_LOT': Returns exactly 1 lot (conservative live start as per simulation report).
+        - '1L_CAPITAL': Sized dynamically based on ₹1.0L capital.
         """
+        if self.lot_sizing_mode == "1_LOT":
+            return 1
+
         stock_clean = stock_symbol.strip().upper()
 
         # Allocate capital per trade
@@ -96,7 +104,8 @@ class RiskController:
         lots = calculate_option_lots(
             allocated_capital=alloc,
             premium_cmp=premium,
-            lot_size=lot_size
+            lot_size=lot_size,
+            sizing_mode=self.lot_sizing_mode
         )
         return lots
 
