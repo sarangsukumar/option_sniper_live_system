@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+logs/
+data/option_sniper.db
+data/daily_trade_ledger.csv
+.env
+.DS_Store

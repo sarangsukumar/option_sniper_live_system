@@ -1,0 +1,212 @@
+"""
+engine/strike_selector.py
+=============================================================================
+Option Strike Selection & Contract Resolver Engine.
+Responsibilities:
+- Calculates exact exchange step sizes from underlying stock CMP
+- Determines At-The-Money (ATM) Put strike price
+- Resolves active monthly expiry date from SEBI master calendar
+- Applies the Expiry Week Rollover Rule (rolls to Next Month if DTE <= 3 days)
+- Maps exchange trading symbols and lot sizes
+=============================================================================
+"""
+
+import os
+import re
+from datetime import datetime, date
+from pathlib import Path
+import pandas as pd
+from config.settings import LOT_SIZE_CSV, EXPIRY_DATES_CSV, MIN_OPTION_PREMIUM
+
+
+class StrikeSelector:
+    def __init__(self, lot_size_csv=LOT_SIZE_CSV, expiry_csv=EXPIRY_DATES_CSV):
+        self.lot_size_csv = Path(lot_size_csv)
+        self.expiry_csv = Path(expiry_csv)
+        self.lot_sizes = {}
+        self.expiries = []
+        self._load_lot_sizes()
+        self._load_expiries()
+
+    def _load_lot_sizes(self):
+        """Loads stock contract lot sizes from CSV."""
+        if not self.lot_size_csv.exists():
+            return
+
+        try:
+            df = pd.read_csv(self.lot_size_csv)
+            # Find column names
+            stock_col = 'stockname' if 'stockname' in df.columns else df.columns[0]
+            lot_col = 'lotsize' if 'lotsize' in df.columns else df.columns[2]
+
+            for _, row in df.iterrows():
+                symbol = str(row[stock_col]).strip().upper()
+                try:
+                    lotsize = int(row[lot_col])
+                    self.lot_sizes[symbol] = lotsize
+                except (ValueError, TypeError):
+                    continue
+        except Exception as e:
+            print(f"⚠️ Warning loading lot sizes: {e}")
+
+    def _load_expiries(self):
+        """Loads and sorts master expiry dates."""
+        if not self.expiry_csv.exists():
+            return
+
+        try:
+            df = pd.read_csv(self.expiry_csv)
+            col = 'master_expiry_date' if 'master_expiry_date' in df.columns else df.columns[0]
+            raw_dates = df[col].dropna().astype(str).str.strip().tolist()
+
+            clean_dates = []
+            for d in raw_dates:
+                # Format to YYYY-MM-DD
+                try:
+                    clean_dates.append(pd.to_datetime(d).strftime('%Y-%m-%d'))
+                except Exception:
+                    pass
+
+            self.expiries = sorted(list(set(clean_dates)))
+        except Exception as e:
+            print(f"⚠️ Warning loading expiries: {e}")
+
+    def get_lot_size(self, symbol: str, default: int = 500) -> int:
+        """Returns standard exchange lot size for the stock."""
+        clean_sym = symbol.strip().upper()
+        return self.lot_sizes.get(clean_sym, default)
+
+    @staticmethod
+    def get_step_size(cmp: float) -> float:
+        """
+        Determines NSE strike step size based on current market price (CMP).
+        """
+        if cmp > 2500:
+            return 50.0
+        elif cmp > 1000:
+            return 20.0
+        elif cmp > 500:
+            return 10.0
+        elif cmp > 250:
+            return 5.0
+        elif cmp > 100:
+            return 2.5
+        else:
+            return 1.0
+
+    def calculate_atm_strike(self, cmp: float, step: float = None) -> float:
+        """
+        Calculates nearest At-The-Money (ATM) strike price.
+        """
+        if step is None:
+            step = self.get_step_size(cmp)
+        raw_strike = round(cmp / step) * step
+        # If step is integer, return float with no fractional residue
+        if step >= 5:
+            return float(int(raw_strike))
+        return round(raw_strike, 1)
+
+    def calculate_itm_strike(self, cmp: float, steps_in: int = 1) -> float:
+        """
+        Calculates In-The-Money (ITM) Put strike price (higher strike than ATM).
+        For Put: ITM = ATM + (steps_in * step)
+        """
+        step = self.get_step_size(cmp)
+        atm = self.calculate_atm_strike(cmp, step)
+        return atm + (steps_in * step)
+
+    def get_active_expiry(self, trade_date: str = None) -> str:
+        """
+        Determines current active monthly expiry date.
+        Applies Expiry Week Rollover Rule:
+        If DTE (Days to Expiry) <= 3 days, rolls to Next Month's monthly expiry
+        to protect against gamma spikes, pin risk, and illiquid wide spreads.
+        """
+        if trade_date is None:
+            trade_dt = date.today()
+        else:
+            trade_dt = pd.to_datetime(trade_date).date()
+
+        future_expiries = [
+            pd.to_datetime(e).date() for e in self.expiries
+            if pd.to_datetime(e).date() >= trade_dt
+        ]
+
+        if not future_expiries:
+            # Fallback to last Thursday of current month
+            return (trade_dt.replace(day=28)).strftime('%Y-%m-%d')
+
+        nearest_expiry = future_expiries[0]
+        dte = (nearest_expiry - trade_dt).days
+
+        # Expiry Week Rollover Rule (<= 3 days)
+        if dte <= 3 and len(future_expiries) > 1:
+            # Roll to next month's expiry
+            return future_expiries[1].strftime('%Y-%m-%d')
+
+        return nearest_expiry.strftime('%Y-%m-%d')
+
+    def build_option_symbol(
+        self,
+        stock_symbol: str,
+        strike: float,
+        opt_type: str = "PE",
+        expiry_date: str = None,
+        trade_date: str = None
+    ) -> dict:
+        """
+        Builds standardized option symbols for NSE and brokers.
+
+        Returns:
+        --------
+        dict with keys:
+          - 'stock': Stock symbol (e.g. 'TECHM')
+          - 'strike': Strike price (e.g. 1600.0)
+          - 'opt_type': 'PE' or 'CE'
+          - 'expiry': YYYY-MM-DD
+          - 'nse_symbol': Standard NSE format (e.g. 'TECHM26NOV1600PE')
+          - 'display_name': Clean readable representation
+        """
+        stock_clean = stock_symbol.strip().upper()
+        if expiry_date is None:
+            expiry_date = self.get_active_expiry(trade_date)
+
+        exp_dt = pd.to_datetime(expiry_date)
+        exp_year = exp_dt.strftime('%y')   # '26'
+        exp_month = exp_dt.strftime('%b').upper() # 'NOV'
+
+        # Format strike string
+        if strike == int(strike):
+            strike_str = str(int(strike))
+        else:
+            strike_str = f"{strike:.1f}"
+
+        nse_symbol = f"{stock_clean}{exp_year}{exp_month}{strike_str}{opt_type}"
+        display_name = f"{stock_clean} {strike_str} {opt_type} ({exp_month} {exp_year})"
+
+        return {
+            "stock": stock_clean,
+            "strike": strike,
+            "opt_type": opt_type,
+            "expiry": expiry_date,
+            "nse_symbol": nse_symbol,
+            "display_name": display_name,
+            "lot_size": self.get_lot_size(stock_clean)
+        }
+
+    def validate_option_candidate(self, cmp: float, premium: float) -> tuple:
+        """
+        Pre-trade sanity checks:
+        - Prevents penny option traps (premium < MIN_OPTION_PREMIUM).
+        - Verifies valid positive CMP.
+
+        Returns:
+        --------
+        (bool, str): (is_valid, reason)
+        """
+        if cmp <= 0:
+            return False, f"Invalid underlying CMP: {cmp}"
+        if premium is not None and premium < MIN_OPTION_PREMIUM:
+            return False, f"Penny option trap: Premium ₹{premium} < ₹{MIN_OPTION_PREMIUM}"
+
+        return True, "Valid candidate"

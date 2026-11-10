@@ -1,0 +1,16 @@
+[Unit]
+Description=Option Sniper Live Production System Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/option_sniper_live_system
+ExecStart=/bin/bash /home/ubuntu/option_sniper_live_system/scripts/run_paper.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/ubuntu/option_sniper_live_system/logs/systemd.log
+StandardError=append:/home/ubuntu/option_sniper_live_system/logs/systemd.log
+
+[Install]
+WantedBy=multi-user.target
