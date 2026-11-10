@@ -268,8 +268,7 @@ class KotakNeoBroker(BaseBroker):
                 transaction_type=tt,
                 amo="NO",
                 disclosed_quantity="0",
-                trigger_price="0",
-                tag=tag
+                trigger_price="0"
             )
 
             order_id = ""
