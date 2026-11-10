@@ -151,14 +151,60 @@ class KotakNeoBroker(BaseBroker):
             print(f"⚠️ Kotak Neo connection error for {self.user_name}: {e}")
             return False
 
+    def resolve_token(self, symbol: str, stock: str = "", opt_type: str = "PE") -> str:
+        """Resolves numeric instrument token for F&O option contract."""
+        sym_str = str(symbol).strip()
+        if sym_str.isdigit():
+            return sym_str
+        if hasattr(self, "_token_cache") and sym_str in self._token_cache:
+            return self._token_cache[sym_str]
+        if not hasattr(self, "_token_cache"):
+            self._token_cache = {}
+        if not self.is_connected or not self.client:
+            return ""
+        try:
+            search_stock = stock
+            if not search_stock:
+                import re
+                m = re.match(r"^([A-Z&-]+?)(\d{2}[A-Z]{3})?(\d+(?:\.\d+)?)(CE|PE)$", sym_str.upper())
+                if m:
+                    search_stock = m.group(1)
+                    opt_type = m.group(4)
+                else:
+                    search_stock = sym_str
+
+            res = self.client.search_scrip(exchange_segment="nse_fo", symbol=search_stock, expiry="", option_type=opt_type.upper())
+            if isinstance(res, list) and len(res) > 0:
+                for r in res:
+                    if str(r.get("pTrdSymbol", "")).strip().upper() == sym_str.upper():
+                        tok = str(r.get("pSymbol", "")).strip()
+                        self._token_cache[sym_str] = tok
+                        return tok
+                tok = str(res[0].get("pSymbol", "")).strip()
+                if tok:
+                    self._token_cache[sym_str] = tok
+                    return tok
+        except Exception as e:
+            print(f"⚠️ Token resolution error for {symbol}: {e}")
+        return ""
+
     def get_ltp(self, symbol: str) -> float:
         """Fetches live quotes from Kotak Neo."""
         if not self.is_connected or not self.client:
             return 0.0
         try:
-            quote = self.client.quotes(instrument_tokens=[{"instrument_token": symbol, "exchange_segment": "nse_fo"}])
-            if quote and 'message' in quote and len(quote['message']) > 0:
-                return float(quote['message'][0].get('last_price', 0.0))
+            token = self.resolve_token(symbol) if not str(symbol).isdigit() else str(symbol)
+            if not token:
+                token = symbol
+            quote = self.client.quotes(instrument_tokens=[{"instrument_token": str(token), "exchange_segment": "nse_fo"}], quote_type="ltp")
+            if isinstance(quote, list) and len(quote) > 0:
+                item = quote[0]
+                ltp_val = item.get('ltp', item.get('last_price', 0.0))
+                return float(ltp_val) if ltp_val is not None else 0.0
+            elif isinstance(quote, dict) and 'message' in quote and len(quote['message']) > 0:
+                item = quote['message'][0]
+                ltp_val = item.get('ltp', item.get('last_price', 0.0))
+                return float(ltp_val) if ltp_val is not None else 0.0
             return 0.0
         except Exception as e:
             print(f"⚠️ Error fetching Kotak LTP for {symbol}: {e}")
