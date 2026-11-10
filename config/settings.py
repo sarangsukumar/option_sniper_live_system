@@ -27,8 +27,8 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 # MODE: 'MOCK' (instant local sim), 'PAPER' (real-time paper trading), 'LIVE' (real capital)
 EXECUTION_MODE = os.environ.get("OPTION_SNIPER_MODE", "PAPER").upper()
 
-# BROKER: 'MOCK', 'KOTAK', 'KITE'
-BROKER_TYPE = os.environ.get("OPTION_SNIPER_BROKER", "MOCK").upper()
+# BROKER: 'KOTAK' (default live broker for Amrit/Manisha), 'KITE', 'MOCK'
+BROKER_TYPE = os.environ.get("OPTION_SNIPER_BROKER", "KOTAK").upper()
 
 # Dry run flag (validates connections and pipelines without sending orders)
 DRY_RUN = os.environ.get("OPTION_SNIPER_DRY_RUN", "0") == "1"
@@ -108,11 +108,16 @@ TIER2_CORE_STOCKS = [
 # BROKER CREDENTIALS & API KEYS
 # -----------------------------------------------------------------------------
 # Kotak Neo API
+KOTAK_AUTH_CSV = os.environ.get("KOTAK_AUTH_CSV", "/home/ubuntu/KotakCodes1/kotak_auth_userid.csv")
+KOTAK_TARGET_USER = os.environ.get("KOTAK_TARGET_USER", "MANISHA")  # Target user AMRIT / MANISHA
+KOTAK_USER_ID = os.environ.get("KOTAK_USER_ID", "ZCK30")
 KOTAK_CONSUMER_KEY = os.environ.get("KOTAK_CONSUMER_KEY", "")
 KOTAK_CONSUMER_SECRET = os.environ.get("KOTAK_CONSUMER_SECRET", "")
 KOTAK_MOBILE_NUMBER = os.environ.get("KOTAK_MOBILE_NUMBER", "")
 KOTAK_PASSWORD = os.environ.get("KOTAK_PASSWORD", "")
 KOTAK_MPIN = os.environ.get("KOTAK_MPIN", "")
+KOTAK_TOTP_SECRET = os.environ.get("KOTAK_TOTP_SECRET", "")
+KOTAK_ORDER_PRODUCT = os.environ.get("KOTAK_ORDER_PRODUCT", "NRML")
 
 # Zerodha Kite Connect API
 KITE_API_KEY = os.environ.get("KITE_API_KEY", "")
