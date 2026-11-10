@@ -21,7 +21,8 @@ from config.settings import (
     MAX_CONSECUTIVE_LOSSES_HALT,
     MAX_CONFIRMATION_ORDER,
     TIER1_CONVICTION_STOCKS,
-    LOT_SIZING_MODE
+    LOT_SIZING_MODE,
+    is_option_trading_enabled
 )
 from engine.qa_execution_guardrails import calculate_option_lots
 
@@ -61,6 +62,10 @@ class RiskController:
         --------
         (bool, str): (allowed, reason)
         """
+        # 0. Master Kill-Switch Check (trading_settings.json)
+        if not is_option_trading_enabled():
+            return False, "Option trading disabled via trading_settings.json (place_option_order=false)"
+
         # 1. Circuit Breaker Check
         if self.circuit_breaker_tripped:
             return False, f"CIRCUIT BREAKER ACTIVE: {self.circuit_breaker_reason}"

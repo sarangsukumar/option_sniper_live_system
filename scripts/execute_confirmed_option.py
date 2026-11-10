@@ -44,7 +44,9 @@ from config.settings import (
     STOP_LOSS_PCT,
     MANDATORY_SQUAREOFF_TIME,
     BROKER_TYPE,
-    DRY_RUN
+    DRY_RUN,
+    is_option_trading_enabled,
+    TRADING_SETTINGS_JSON
 )
 from engine.strike_selector import StrikeSelector
 from engine.qa_execution_guardrails import round_to_nse_tick
@@ -122,6 +124,16 @@ def execute_trade(stock: str, rank: int, cmp: float, trigger_type: str, entry_09
     selector = StrikeSelector()
     notifier = TelegramNotifier()
     ledger = TradeLedger()
+
+    # 2.5 Master Kill-Switch Guard (trading_settings.json)
+    if not is_option_trading_enabled():
+        skip_msg = f"⛔ <b>OPTION SNIPER SKIPPED (KILL-SWITCH ACTIVE)</b>\n" \
+                   f"• Stock: <code>{stock}</code> (Rank #{rank})\n" \
+                   f"• Reason: <code>place_option_order: false</code> in <code>trading_settings.json</code>\n" \
+                   f"• Status: Option trade placement is disabled in system configuration."
+        log(f"⛔ Option trading disabled via {TRADING_SETTINGS_JSON} (place_option_order=false). Skipping trade.")
+        notifier.send_message(skip_msg)
+        return
 
     # 3. DTE Expiry Lockout Guard (Strict Simulation Rule: DTE <= 4 skipped)
     is_lockout, dte = selector.is_expiry_lockout(today_str)

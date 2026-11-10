@@ -149,6 +149,27 @@ TELEGRAM_ENDPOINTS = [
 LOT_SIZE_CSV = CONFIG_DIR / "historical_lotsize_new.csv"
 EXPIRY_DATES_CSV = CONFIG_DIR / "master_expiry_dates.csv"
 EXPIRY_DATES_TXT = Path(os.environ.get("EXPIRY_DATES_TXT", "/home/ubuntu/KotakCodes1/expiry_dates.txt"))
+TRADING_SETTINGS_JSON = Path(os.environ.get("TRADING_SETTINGS_JSON", "/home/ubuntu/KotakCodes1/trading_settings.json"))
 DATABASE_PATH = DATA_DIR / "option_sniper.db"
 DAILY_LEDGER_CSV = DATA_DIR / "daily_trade_ledger.csv"
 AUDIT_LOG_FILE = LOGS_DIR / "option_sniper.log"
+
+
+def is_option_trading_enabled() -> bool:
+    """
+    Checks the master kill-switch in trading_settings.json.
+    Returns False if either place_option_order or place_option_sniper_order is False.
+    """
+    try:
+        if TRADING_SETTINGS_JSON.exists():
+            import json
+            with open(TRADING_SETTINGS_JSON, "r") as f:
+                data = json.load(f)
+                if not data.get("place_option_order", True):
+                    return False
+                if not data.get("place_option_sniper_order", True):
+                    return False
+        return True
+    except Exception as e:
+        print(f"⚠️ Warning reading trading_settings.json: {e}")
+        return True
