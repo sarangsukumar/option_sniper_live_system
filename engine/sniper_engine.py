@@ -30,6 +30,7 @@ from config.settings import (
     DRY_RUN
 )
 from engine.strike_selector import StrikeSelector
+from engine.qa_execution_guardrails import round_to_nse_tick
 from engine.risk_controller import RiskController
 from engine.trade_manager import ManagedOptionPosition
 from models.model_loader import ModelLoader
@@ -170,21 +171,22 @@ class OptionSniperEngine:
         print(f"🚀 Placing BUY order: {total_quantity} qty of {option_sym} @ ₹{option_premium_cmp:.2f}...")
 
         if self.dry_run:
-            fill_price = option_premium_cmp
+            fill_price = round_to_nse_tick(option_premium_cmp, 'nearest')
             order_id = f"DRY_{uuid.uuid4().hex[:6]}"
             print(f"🧪 [DRY RUN] Order simulated filled: {order_id} @ ₹{fill_price:.2f}")
         else:
+            limit_entry_px = round_to_nse_tick(option_premium_cmp, 'nearest')
             order_res = self.broker.place_order(
                 symbol=option_sym,
                 quantity=total_quantity,
                 side="BUY",
-                order_type="MARKET",
-                price=option_premium_cmp
+                order_type="LIMIT",
+                price=limit_entry_px
             )
             if order_res.get('status') != 'SUCCESS':
                 print(f"❌ Order failed: {order_res.get('message')}")
                 return None
-            fill_price = order_res.get('fill_price', option_premium_cmp)
+            fill_price = float(order_res.get('fill_price', limit_entry_px))
             order_id = order_res.get('order_id', str(uuid.uuid4()))
 
         trade_id = f"TRD_{datetime.now().strftime('%Y%m%d')}_{stock}_{conf_order}"
@@ -251,12 +253,13 @@ class OptionSniperEngine:
         print(f"🏁 Exiting {stock} ({position.option_symbol}) | Reason: {reason} @ ₹{exit_price:.2f}")
 
         if not self.dry_run:
+            limit_exit_px = round_to_nse_tick(exit_price, 'floor')
             self.broker.place_order(
                 symbol=position.option_symbol,
                 quantity=position.quantity,
                 side="SELL",
-                order_type="MARKET",
-                price=exit_price,
+                order_type="LIMIT",
+                price=limit_exit_px,
                 tag=reason[:20]
             )
 

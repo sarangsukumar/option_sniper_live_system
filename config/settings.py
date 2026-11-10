@@ -27,6 +27,9 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 # MODE: 'MOCK' (instant local sim), 'PAPER' (real-time paper trading), 'LIVE' (real capital)
 EXECUTION_MODE = os.environ.get("OPTION_SNIPER_MODE", "PAPER").upper()
 
+# ORDER TYPE: 'LIMIT' (places limit order at current LTP per MIS standard)
+ORDER_TYPE = os.environ.get("OPTION_SNIPER_ORDER_TYPE", "LIMIT").upper()
+
 # BROKER: 'KOTAK' (default live broker for Amrit/Manisha), 'KITE', 'MOCK'
 BROKER_TYPE = os.environ.get("OPTION_SNIPER_BROKER", "KOTAK").upper()
 

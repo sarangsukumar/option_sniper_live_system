@@ -215,7 +215,7 @@ class KotakNeoBroker(BaseBroker):
         symbol: str,
         quantity: int,
         side: str = "BUY",
-        order_type: str = "MARKET",
+        order_type: str = "LIMIT",
         price: float = 0.0,
         tag: str = "OPTION_SNIPER"
     ) -> Dict[str, Any]:
@@ -225,8 +225,16 @@ class KotakNeoBroker(BaseBroker):
 
         try:
             tt = "B" if side.upper() == "BUY" else "S"
-            ot = "MKT" if order_type.upper() == "MARKET" else "L"
-            pr = str(round_to_nse_tick(price, "floor")) if ot == "L" else "0"
+            ot = "MKT" if order_type.upper() in ["MARKET", "MKT"] else "L"
+
+            if ot == "L":
+                if price <= 0.0:
+                    price = self.get_ltp(symbol)
+                tick_dir = "floor" if side.upper() == "SELL" else "nearest"
+                rounded_px = round_to_nse_tick(price, tick_dir)
+                pr = f"{rounded_px:.2f}"
+            else:
+                pr = "0"
 
             res = self.client.place_order(
                 exchange_segment="nse_fo",
@@ -250,10 +258,11 @@ class KotakNeoBroker(BaseBroker):
             else:
                 is_ok = False
 
+            fill_px = float(pr) if ot == "L" else price
             return {
                 "status": "SUCCESS" if (is_ok or order_id) else "FAILED",
                 "order_id": order_id,
-                "fill_price": price,
+                "fill_price": fill_px if fill_px > 0 else price,
                 "message": str(res)
             }
         except Exception as e:
@@ -289,6 +298,7 @@ class KotakNeoBroker(BaseBroker):
             net_qty = int(p.get("netQty", 0))
             sym = p.get("tradingSymbol", "")
             if net_qty > 0:
-                res = self.place_order(sym, net_qty, side="SELL", order_type="MARKET", tag="EOD_SQUAREOFF")
+                ltp = self.get_ltp(sym)
+                res = self.place_order(sym, net_qty, side="SELL", order_type="LIMIT", price=ltp, tag="EOD_SQUAREOFF")
                 results.append(res)
         return results

@@ -18,6 +18,7 @@ REPO_ROOT = os.path.dirname(DIR)
 sys.path.insert(0, REPO_ROOT)
 
 from config.settings import BROKER_TYPE, DRY_RUN
+from engine.qa_execution_guardrails import round_to_nse_tick
 from broker.kotak_neo_broker import KotakNeoBroker
 from broker.mock_broker import MockBroker
 from storage.ledger import TradeLedger
@@ -65,8 +66,9 @@ def main():
                     entry_px = state['entry_price']
                     ltp = broker.get_ltp(sym) or entry_px
 
-                    res = broker.place_order(symbol=sym, quantity=qty, side="SELL", order_type="MARKET", price=ltp, tag="EOD_MANDATORY_1515")
-                    fill_px = float(res.get('fill_price', ltp))
+                    limit_exit_px = round_to_nse_tick(ltp, 'floor')
+                    res = broker.place_order(symbol=sym, quantity=qty, side="SELL", order_type="LIMIT", price=limit_exit_px, tag="EOD_MANDATORY_1515")
+                    fill_px = float(res.get('fill_price', limit_exit_px))
                     gross_pnl = (fill_px - entry_px) * qty
                     ret_pct = (fill_px - entry_px) / entry_px * 100.0
 

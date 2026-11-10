@@ -47,6 +47,7 @@ from config.settings import (
     DRY_RUN
 )
 from engine.strike_selector import StrikeSelector
+from engine.qa_execution_guardrails import round_to_nse_tick
 from broker.kotak_neo_broker import KotakNeoBroker
 from broker.mock_broker import MockBroker
 from telemetry.telegram_notifier import TelegramNotifier
@@ -170,14 +171,15 @@ def execute_trade(stock: str, rank: int, cmp: float, trigger_type: str, entry_09
         log(f"🚫 Option candidate validation failed: {reason}")
         return
 
-    # 8. Place BUY Order for 1 Lot
-    log(f"🚀 Placing 1-LOT BUY ORDER: {total_qty} units of {nse_symbol} @ ₹{opt_ltp:.2f} (Approx Capital: ₹{opt_ltp * total_qty:,.2f})...")
+    # 8. Place LIMIT BUY Order for 1 Lot at Current Price
+    limit_entry_px = round_to_nse_tick(opt_ltp, 'nearest')
+    log(f"🚀 Placing 1-LOT LIMIT BUY ORDER: {total_qty} units of {nse_symbol} @ ₹{limit_entry_px:.2f} (LTP: ₹{opt_ltp:.2f}, Approx Capital: ₹{limit_entry_px * total_qty:,.2f})...")
     order_res = broker.place_order(
         symbol=nse_symbol,
         quantity=total_qty,
         side="BUY",
-        order_type="MARKET",
-        price=opt_ltp,
+        order_type="LIMIT",
+        price=limit_entry_px,
         tag="OPTION_SNIPER_CONF1"
     )
 
@@ -185,11 +187,11 @@ def execute_trade(stock: str, rank: int, cmp: float, trigger_type: str, entry_09
         log(f"❌ Order placement failed: {order_res.get('message')}")
         return
 
-    fill_price = float(order_res.get('fill_price', opt_ltp))
-    order_id = order_res.get('order_id', 'LIVE_MKT')
+    fill_price = float(order_res.get('fill_price', limit_entry_px))
+    order_id = order_res.get('order_id', 'LIVE_LIMIT')
     entry_time_str = datetime.now(IST).strftime('%H:%M:%S')
 
-    log(f"✅ ORDER FILLED: ID={order_id} | {total_qty} units @ ₹{fill_price:.2f} | Execution Time: {entry_time_str} IST")
+    log(f"✅ LIMIT ORDER PLACED/FILLED: ID={order_id} | {total_qty} units @ ₹{fill_price:.2f} (Limit Price: ₹{limit_entry_px:.2f}) | Execution Time: {entry_time_str} IST")
 
     # Exit Targets
     hard_sl_price = round(fill_price * (1.0 - STOP_LOSS_PCT), 2)       # -15%
@@ -227,12 +229,13 @@ def execute_trade(stock: str, rank: int, cmp: float, trigger_type: str, entry_09
 
     # Dispatch Entry Alert to Telegram
     entry_alert = (
-        f"🎯 <b>OPTION SNIPER LIVE ORDER FILLED</b> 🟢\n"
+        f"🎯 <b>OPTION SNIPER LIVE LIMIT ORDER PLACED</b> 🟢\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"• <b>Stock:</b> <code>{stock}</code> (Rank #{rank} - Conf #1)\n"
         f"• <b>Contract:</b> <code>{nse_symbol}</code>\n"
+        f"• <b>Order Type:</b> <b>LIMIT @ Current Price (₹{limit_entry_px:.2f})</b>\n"
         f"• <b>Strike:</b> ₹{atm_strike:,.1f} PE | <b>Expiry:</b> {expiry_date} (DTE: {dte}d)\n"
-        f"• <b>Fill Premium:</b> ₹{fill_price:.2f}\n"
+        f"• <b>Fill/Limit Premium:</b> ₹{fill_price:.2f}\n"
         f"• <b>Quantity:</b> {total_qty} units (1 Lot)\n"
         f"• <b>Capital Committed:</b> ₹{fill_price * total_qty:,.2f}\n"
         f"• <b>Hard SL (-15%):</b> ₹{hard_sl_price:.2f}\n"
@@ -316,17 +319,18 @@ def _execute_exit(broker, notifier, ledger, trade_record: dict, exit_price: floa
     qty = trade_record['quantity']
     entry_px = trade_record['entry_price']
 
-    log(f"🏁 Liquidating {qty} units of {symbol} @ ₹{exit_price:.2f} | Reason: {reason}...")
+    limit_exit_px = round_to_nse_tick(exit_price, 'floor')
+    log(f"🏁 Liquidating {qty} units of {symbol} via LIMIT SELL @ ₹{limit_exit_px:.2f} (LTP: ₹{exit_price:.2f}) | Reason: {reason}...")
     sell_res = broker.place_order(
         symbol=symbol,
         quantity=qty,
         side="SELL",
-        order_type="MARKET",
-        price=exit_price,
+        order_type="LIMIT",
+        price=limit_exit_px,
         tag=reason[:20]
     )
 
-    realized_px = float(sell_res.get('fill_price', exit_price))
+    realized_px = float(sell_res.get('fill_price', limit_exit_px))
     gross_pnl = (realized_px - entry_px) * qty
     ret_pct = (realized_px - entry_px) / entry_px * 100.0
 
