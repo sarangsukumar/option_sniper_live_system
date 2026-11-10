@@ -148,6 +148,7 @@ TELEGRAM_ENDPOINTS = [
 # -----------------------------------------------------------------------------
 LOT_SIZE_CSV = CONFIG_DIR / "historical_lotsize_new.csv"
 EXPIRY_DATES_CSV = CONFIG_DIR / "master_expiry_dates.csv"
+EXPIRY_DATES_TXT = Path(os.environ.get("EXPIRY_DATES_TXT", "/home/ubuntu/KotakCodes1/expiry_dates.txt"))
 DATABASE_PATH = DATA_DIR / "option_sniper.db"
 DAILY_LEDGER_CSV = DATA_DIR / "daily_trade_ledger.csv"
 AUDIT_LOG_FILE = LOGS_DIR / "option_sniper.log"

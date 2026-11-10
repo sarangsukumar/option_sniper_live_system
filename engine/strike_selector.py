@@ -16,13 +16,14 @@ import re
 from datetime import datetime, date
 from pathlib import Path
 import pandas as pd
-from config.settings import LOT_SIZE_CSV, EXPIRY_DATES_CSV, MIN_OPTION_PREMIUM, EXPIRY_SKIP_DTE_THRESHOLD
+from config.settings import LOT_SIZE_CSV, EXPIRY_DATES_CSV, EXPIRY_DATES_TXT, MIN_OPTION_PREMIUM, EXPIRY_SKIP_DTE_THRESHOLD
 
 
 class StrikeSelector:
-    def __init__(self, lot_size_csv=LOT_SIZE_CSV, expiry_csv=EXPIRY_DATES_CSV):
+    def __init__(self, lot_size_csv=LOT_SIZE_CSV, expiry_csv=EXPIRY_DATES_CSV, expiry_txt=EXPIRY_DATES_TXT):
         self.lot_size_csv = Path(lot_size_csv)
         self.expiry_csv = Path(expiry_csv)
+        self.expiry_txt = Path(expiry_txt) if expiry_txt else None
         self.lot_sizes = {}
         self.expiries = []
         self._load_lot_sizes()
@@ -50,26 +51,47 @@ class StrikeSelector:
             print(f"⚠️ Warning loading lot sizes: {e}")
 
     def _load_expiries(self):
-        """Loads and sorts master expiry dates."""
-        if not self.expiry_csv.exists():
-            return
+        """Loads and sorts master expiry dates dynamically from live expiry_dates.txt and CSV fallback."""
+        clean_dates = []
 
-        try:
-            df = pd.read_csv(self.expiry_csv)
-            col = 'master_expiry_date' if 'master_expiry_date' in df.columns else df.columns[0]
-            raw_dates = df[col].dropna().astype(str).str.strip().tolist()
+        # 1. Primary Dynamic Source: Live daily-updated expiry_dates.txt
+        if self.expiry_txt and self.expiry_txt.exists():
+            try:
+                with open(self.expiry_txt, 'r') as f:
+                    content = f.read()
+                if 'expiryDatesList' in content:
+                    start = content.find('"') + 1
+                    end = content.rfind('"')
+                    dates_str = content[start:end]
+                else:
+                    dates_str = content
 
-            clean_dates = []
-            for d in raw_dates:
-                # Format to YYYY-MM-DD
-                try:
-                    clean_dates.append(pd.to_datetime(d).strftime('%Y-%m-%d'))
-                except Exception:
-                    pass
+                for d in dates_str.split(','):
+                    d_clean = d.strip().replace('"', '').replace("'", "").replace(';', '')
+                    if d_clean:
+                        try:
+                            clean_dates.append(pd.to_datetime(d_clean).strftime('%Y-%m-%d'))
+                        except Exception:
+                            pass
+            except Exception as e:
+                print(f"⚠️ Warning loading dynamic expiry txt ({self.expiry_txt}): {e}")
 
-            self.expiries = sorted(list(set(clean_dates)))
-        except Exception as e:
-            print(f"⚠️ Warning loading expiries: {e}")
+        # 2. Historical & Backup Fallback: master_expiry_dates.csv
+        if self.expiry_csv and self.expiry_csv.exists():
+            try:
+                df = pd.read_csv(self.expiry_csv)
+                col = 'master_expiry_date' if 'master_expiry_date' in df.columns else df.columns[0]
+                raw_dates = df[col].dropna().astype(str).str.strip().tolist()
+
+                for d in raw_dates:
+                    try:
+                        clean_dates.append(pd.to_datetime(d).strftime('%Y-%m-%d'))
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"⚠️ Warning loading expiries CSV: {e}")
+
+        self.expiries = sorted(list(set(clean_dates)))
 
     def get_lot_size(self, symbol: str, default: int = 500) -> int:
         """Returns standard exchange lot size for the stock."""
